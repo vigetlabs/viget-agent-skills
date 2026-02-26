@@ -31,6 +31,12 @@ Claude Web & Desktop](docs/using-skills-in-claude-web-and-desktop.md).
 npx skills add vigetlabs/viget-agent-skills
 ```
 
+[`skills`](https://github.com/vercel-labs/skills) by Vercel is a CLI for installing and
+managing reusable skills across 37+ AI coding agents. Requires
+[Node.js and npm](https://nodejs.org/) —
+[`npx`](https://docs.npmjs.com/cli/v11/commands/npx) runs the package without
+a global install.
+
 The CLI auto-detects your installed agents and symlinks the skills into each
 one's expected directory. Options:
 
