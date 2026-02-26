@@ -1,4 +1,4 @@
-# Your Skills Repo Name
+# Viget Agent Skills
 
 A collection of skills for AI coding agents. Works with Claude Code, Cursor,
 Codex, GitHub Copilot, Gemini CLI, more! Based on the
@@ -9,7 +9,7 @@ Codex, GitHub Copilot, Gemini CLI, more! Based on the
 ### Any agent (recommended)
 
 ```bash
-npx skills add your-org/your-skills-repo
+npx skills add vigetlabs/viget-agent-skills
 ```
 
 The CLI auto-detects your installed agents and symlinks the skills into each
@@ -17,19 +17,19 @@ one's expected directory. Options:
 
 ```bash
 # Install a single skill
-npx skills add your-org/your-skills-repo --skill skill-name
+npx skills add vigetlabs/viget-agent-skills --skill skill-name
 
 # Install globally (available in all projects)
-npx skills add your-org/your-skills-repo -g
+npx skills add vigetlabs/viget-agent-skills -g
 
 # Target a specific agent
-npx skills add your-org/your-skills-repo -a claude-code
+npx skills add vigetlabs/viget-agent-skills -a claude-code
 ```
 
 ### Claude Code
 
 ```
-/install-plugin your-org/your-skills-repo
+/install-plugin vigetlabs/viget-agent-skills
 ```
 
 ### Manual
@@ -37,16 +37,16 @@ npx skills add your-org/your-skills-repo -a claude-code
 Clone the repo and symlink the skills you want:
 
 ```bash
-git clone https://github.com/your-org/your-skills-repo.git ~/.agent-skills/your-skills-repo
+git clone https://github.com/vigetlabs/viget-agent-skills.git ~/.agent-skills/viget-agent-skills
 
 # Claude Code
-ln -s ~/.agent-skills/your-skills-repo/skills/* ~/.claude/skills/
+ln -s ~/.agent-skills/viget-agent-skills/skills/* ~/.claude/skills/
 
 # Cursor
-ln -s ~/.agent-skills/your-skills-repo/skills/* ~/.cursor/skills/
+ln -s ~/.agent-skills/viget-agent-skills/skills/* ~/.cursor/skills/
 
 # Codex
-ln -s ~/.agent-skills/your-skills-repo/skills/* ~/.codex/skills/
+ln -s ~/.agent-skills/viget-agent-skills/skills/* ~/.codex/skills/
 ```
 
 Symlinks keep your skills in sync with `git pull`.
