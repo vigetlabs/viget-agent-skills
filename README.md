@@ -7,7 +7,23 @@ A collection of skills for AI coding agents. Works with Claude Code, Cursor,
 Codex, GitHub Copilot, Gemini CLI, more! Based on the
 [agentskills.io](https://agentskills.io/) standard.
 
+## Skills We Like
+
+### Development
+
+- [superpowers](https://github.com/obra/superpowers) — A complete software
+  development workflow for coding agents, with composable skills for design
+  refinement, planning, and test-driven implementation.
+- [compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) —
+  A Skills plugin emphasizing planning, review, and knowledge
+  codification to make subsequent engineering work easier.
+
 ## Install
+
+### Claude Web & Desktop
+
+Upload skills directly in the Claude app — no CLI needed. See [Using Skills in
+Claude Web & Desktop](docs/using-skills-in-claude-web-and-desktop.md).
 
 ### Any agent (recommended)
 

@@ -1,3 +1,5 @@
 # Scratch - Useful for storing temporary files & llm generated outputs
 **/scratch
 **.scratch.*
+
+.DS_Store
