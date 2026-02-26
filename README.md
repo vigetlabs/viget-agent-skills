@@ -1,5 +1,8 @@
 # Viget Agent Skills
 
+> [!WARNING]
+> This is a **public repository**. Skills should be general-use or contain only publicly available Viget information. Do not commit proprietary or internal-only content.
+
 A collection of skills for AI coding agents. Works with Claude Code, Cursor,
 Codex, GitHub Copilot, Gemini CLI, more! Based on the
 [agentskills.io](https://agentskills.io/) standard.
