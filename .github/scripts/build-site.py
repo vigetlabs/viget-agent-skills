@@ -8,18 +8,18 @@ Run from the repository root:
     python3 .github/scripts/build-site.py
 """
 
-from __future__ import annotations
-
+import html
 import logging
 import re
 import shutil
+import sys
 import zipfile
 from pathlib import Path
 from typing import NamedTuple
 
-import bleach
 import frontmatter
 import markdown
+import nh3
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -34,21 +34,25 @@ _VALID_NAME = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 # Reuse one Markdown instance; call .reset() between conversions
 _MD = markdown.Markdown(extensions=["fenced_code", "tables"], output_format="html")
 
-# Allowed HTML tags and attributes after bleach sanitization
-_ALLOWED_TAGS = frozenset(bleach.ALLOWED_TAGS) | {
-    "p", "pre", "code", "h1", "h2", "h3", "h4", "h5", "h6",
-    "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td",
-    "blockquote", "hr", "br", "img",
+# Allowed HTML tags and attributes after nh3 sanitization.
+# bleach defaults were: a, abbr, acronym, b, blockquote, code, em, i, li, ol, strong, ul
+_ALLOWED_TAGS = {
+    "a", "abbr", "acronym", "b", "blockquote", "code", "em", "i", "li", "ol", "strong", "ul",
+    "p", "pre", "h1", "h2", "h3", "h4", "h5", "h6",
+    "table", "thead", "tbody", "tr", "th", "td",
+    "hr", "br", "img",
 }
-_ALLOWED_ATTRS = dict(bleach.ALLOWED_ATTRIBUTES)
-_ALLOWED_ATTRS.update({
-    "img": ["src", "alt"],
-    "a": ["href", "title"],
-    "th": ["align"],
-    "td": ["align"],
-    "code": ["class"],   # fenced_code adds language-* class
-    "pre": ["class"],
-})
+# bleach defaults were: {"a": ["href", "title"], "abbr": ["title"], "acronym": ["title"]}
+_ALLOWED_ATTRS = {
+    "a": {"href", "title"},
+    "abbr": {"title"},
+    "acronym": {"title"},
+    "img": {"src", "alt"},
+    "th": {"align"},
+    "td": {"align"},
+    "code": {"class"},   # fenced_code adds language-* class
+    "pre": {"class"},
+}
 
 CSS = """
     body {
@@ -103,7 +107,7 @@ def to_html(source: str) -> str:
     """Convert a Markdown string to a sanitized HTML fragment."""
     raw = _MD.convert(source.strip())
     _MD.reset()
-    return bleach.clean(raw, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS, strip=True)
+    return nh3.clean(raw, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS, strip_comments=True)
 
 
 def wrap_html(
@@ -114,64 +118,65 @@ def wrap_html(
     back_link: bool = False,
 ) -> str:
     """Wrap an HTML fragment in a full document with inline CSS."""
-    extras = ""
-    if back_link:
-        extras += '<a class="back-link" href="../../">← All Skills</a>\n'
-    if download_url:
-        extras += f'<a class="download-btn" href="{download_url}">Download .zip</a>\n'
-    return (
-        f"<!DOCTYPE html>\n"
-        f'<html lang="en">\n'
-        f"<head>\n"
-        f'  <meta charset="UTF-8">\n'
-        f'  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
-        f"  <title>{title}</title>\n"
-        f"  <style>{CSS}  </style>\n"
-        f"</head>\n"
-        f"<body>\n"
-        f"{extras}"
-        f"{body}\n"
-        f"</body>\n"
-        f"</html>\n"
-    )
+    back = '<a class="back-link" href="../../">\u2190 All Skills</a>\n' if back_link else ""
+    dl = f'<a class="download-btn" href="{download_url}">Download .zip</a>\n' if download_url else ""
+    return f"""\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https: data:">
+  <title>{html.escape(title)}</title>
+  <style>{CSS}  </style>
+</head>
+<body>
+{back}{dl}{body}
+</body>
+</html>
+"""
 
 
 def zip_skill(skill_dir: Path, zip_path: Path) -> None:
     """Write a zip whose root entry is the skill folder (e.g. viget-lore/)."""
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for file_path in sorted(skill_dir.rglob("*")):
-            if file_path.is_file():
-                # Arcname keeps the skill folder as the zip root
-                arcname = file_path.relative_to(skill_dir.parent)
-                zf.write(file_path, arcname)
+            if not file_path.is_file():
+                continue
+            if file_path.is_symlink():
+                logger.warning("Skipping symlink %s", file_path)
+                continue
+            # Arcname keeps the skill folder as the zip root
+            arcname = file_path.relative_to(skill_dir.parent)
+            zf.write(file_path, arcname)
 
 
-def build_skill(skill_dir: Path) -> SkillMeta | None:
+def build_skill(skill_dir: Path) -> SkillMeta:
     """Build zip + index.html for one skill directory.
 
-    Returns SkillMeta on success, None if the skill is skipped.
+    Returns SkillMeta on success, exits with code 1 on failure.
     """
     dir_name = skill_dir.name
 
     if not _VALID_NAME.match(dir_name):
-        logger.warning(
-            "Skipping %r — name must match ^[a-z][a-z0-9-]{0,63}$", dir_name
+        logger.error(
+            "Skill %r failed — name must match ^[a-z][a-z0-9-]{0,63}$", dir_name
         )
-        return None
+        sys.exit(1)
 
     skill_md_path = skill_dir / "SKILL.md"
     if not skill_md_path.exists():
-        logger.warning("Skipping %r — no SKILL.md found", dir_name)
-        return None
+        logger.error("Skill %r failed — no SKILL.md found", dir_name)
+        sys.exit(1)
 
     # python-frontmatter correctly handles multi-line YAML block scalars (>-, |, etc.)
     post = frontmatter.load(skill_md_path)
-    display_name: str = post.get("name", dir_name)
-    description: str = post.get("description", "")
+    display_name = post.get("name", dir_name)
+    description = post.get("description", "")
 
     # HTML source: README.md if present, else the SKILL.md body (frontmatter already stripped)
     readme_path = skill_dir / "README.md"
-    source_text: str = (
+    source_text = (
         readme_path.read_text(encoding="utf-8")
         if readme_path.exists()
         else post.content
@@ -195,17 +200,18 @@ def build_skill(skill_dir: Path) -> SkillMeta | None:
 
 def build_root_index(skills: list[SkillMeta]) -> None:
     """Generate _site/index.html listing all skills alphabetically."""
-    rows = "\n".join(
-        f"    <tr>\n"
-        f'      <td>\n'
-        f'        <a href="skills/{s.dir_name}/">{s.name}</a>\n'
-        f'        <div class="skill-desc">{s.description}</div>\n'
-        f"      </td>\n"
-        f'      <td><a class="download-btn" href="skills/{s.dir_name}/{s.dir_name}.zip">'
-        f"Download .zip</a></td>\n"
-        f"    </tr>"
-        for s in sorted(skills, key=lambda s: s.name.lower())
-    )
+    rows = []
+    for s in sorted(skills, key=lambda s: s.name.lower()):
+        rows.append(
+            f"    <tr>\n"
+            f'      <td>\n'
+            f'        <a href="skills/{s.dir_name}/">{html.escape(s.name)}</a>\n'
+            f'        <div class="skill-desc">{html.escape(s.description)}</div>\n'
+            f"      </td>\n"
+            f'      <td><a class="download-btn" href="skills/{s.dir_name}/{s.dir_name}.zip">'
+            f"Download .zip</a></td>\n"
+            f"    </tr>"
+        )
 
     body = (
         "<h1>Viget Agent Skills</h1>\n"
@@ -216,7 +222,7 @@ def build_root_index(skills: list[SkillMeta]) -> None:
         "    <tr><th>Skill</th><th>Download</th></tr>\n"
         "  </thead>\n"
         "  <tbody>\n"
-        f"{rows}\n"
+        f"{''.join(rows)}\n"
         "  </tbody>\n"
         "</table>"
     )
@@ -233,9 +239,11 @@ def main() -> None:
     skills: list[SkillMeta] = []
     for skill_dir in sorted(SKILLS_DIR.iterdir()):
         if skill_dir.is_dir():
-            meta = build_skill(skill_dir)
-            if meta:
-                skills.append(meta)
+            skills.append(build_skill(skill_dir))
+
+    if not skills:
+        logger.error("No skill directories found in %s/ — aborting.", SKILLS_DIR)
+        sys.exit(1)
 
     build_root_index(skills)
     logger.info("Done — built %d skill(s) into %s/", len(skills), SITE_DIR)
