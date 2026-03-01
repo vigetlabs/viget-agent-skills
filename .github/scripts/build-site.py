@@ -1,0 +1,245 @@
+#!/usr/bin/env python3
+"""Build the GitHub Pages site for viget-agent-skills.
+
+Reads skills/ directory, generates per-skill index.html + zip, and a root
+index.html listing all skills. Output goes to _site/.
+
+Run from the repository root:
+    python3 .github/scripts/build-site.py
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+import shutil
+import zipfile
+from pathlib import Path
+from typing import NamedTuple
+
+import bleach
+import frontmatter
+import markdown
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
+
+SKILLS_DIR = Path("skills")
+SITE_DIR = Path("_site")
+SKILLS_SITE_DIR = SITE_DIR / "skills"
+
+# Skill name convention from CLAUDE.md: lowercase letters, digits, hyphens, max 64 chars
+_VALID_NAME = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
+
+# Reuse one Markdown instance; call .reset() between conversions
+_MD = markdown.Markdown(extensions=["fenced_code", "tables"], output_format="html")
+
+# Allowed HTML tags and attributes after bleach sanitization
+_ALLOWED_TAGS = frozenset(bleach.ALLOWED_TAGS) | {
+    "p", "pre", "code", "h1", "h2", "h3", "h4", "h5", "h6",
+    "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td",
+    "blockquote", "hr", "br", "img",
+}
+_ALLOWED_ATTRS = dict(bleach.ALLOWED_ATTRIBUTES)
+_ALLOWED_ATTRS.update({
+    "img": ["src", "alt"],
+    "a": ["href", "title"],
+    "th": ["align"],
+    "td": ["align"],
+    "code": ["class"],   # fenced_code adds language-* class
+    "pre": ["class"],
+})
+
+CSS = """
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 2rem auto;
+      padding: 0 1.5rem;
+      color: #333;
+      line-height: 1.6;
+    }
+    h1, h2, h3 { line-height: 1.3; }
+    a { color: #0066cc; }
+    code {
+      background: #f4f4f4;
+      padding: 0.15em 0.35em;
+      border-radius: 3px;
+      font-size: 0.9em;
+    }
+    pre {
+      background: #f4f4f4;
+      padding: 1rem;
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+    pre code { background: none; padding: 0; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #ddd; }
+    th { background: #f8f8f8; font-weight: 600; }
+    .download-btn {
+      display: inline-block;
+      background: #0066cc;
+      color: white;
+      padding: 0.5rem 1.25rem;
+      border-radius: 6px;
+      text-decoration: none;
+      font-size: 0.95em;
+      margin: 0.5rem 0 1.5rem;
+    }
+    .download-btn:hover { background: #0052a3; }
+    .skill-desc { color: #555; font-size: 0.9em; margin-top: 0.2rem; }
+    .back-link { display: block; margin-bottom: 1.5rem; font-size: 0.9em; }
+"""
+
+
+class SkillMeta(NamedTuple):
+    name: str
+    description: str
+    dir_name: str  # filesystem directory name, used for URL paths
+
+
+def to_html(source: str) -> str:
+    """Convert a Markdown string to a sanitized HTML fragment."""
+    raw = _MD.convert(source.strip())
+    _MD.reset()
+    return bleach.clean(raw, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS, strip=True)
+
+
+def wrap_html(
+    title: str,
+    body: str,
+    *,
+    download_url: str | None = None,
+    back_link: bool = False,
+) -> str:
+    """Wrap an HTML fragment in a full document with inline CSS."""
+    extras = ""
+    if back_link:
+        extras += '<a class="back-link" href="../../">← All Skills</a>\n'
+    if download_url:
+        extras += f'<a class="download-btn" href="{download_url}">Download .zip</a>\n'
+    return (
+        f"<!DOCTYPE html>\n"
+        f'<html lang="en">\n'
+        f"<head>\n"
+        f'  <meta charset="UTF-8">\n'
+        f'  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+        f"  <title>{title}</title>\n"
+        f"  <style>{CSS}  </style>\n"
+        f"</head>\n"
+        f"<body>\n"
+        f"{extras}"
+        f"{body}\n"
+        f"</body>\n"
+        f"</html>\n"
+    )
+
+
+def zip_skill(skill_dir: Path, zip_path: Path) -> None:
+    """Write a zip whose root entry is the skill folder (e.g. viget-lore/)."""
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for file_path in sorted(skill_dir.rglob("*")):
+            if file_path.is_file():
+                # Arcname keeps the skill folder as the zip root
+                arcname = file_path.relative_to(skill_dir.parent)
+                zf.write(file_path, arcname)
+
+
+def build_skill(skill_dir: Path) -> SkillMeta | None:
+    """Build zip + index.html for one skill directory.
+
+    Returns SkillMeta on success, None if the skill is skipped.
+    """
+    dir_name = skill_dir.name
+
+    if not _VALID_NAME.match(dir_name):
+        logger.warning(
+            "Skipping %r — name must match ^[a-z][a-z0-9-]{0,63}$", dir_name
+        )
+        return None
+
+    skill_md_path = skill_dir / "SKILL.md"
+    if not skill_md_path.exists():
+        logger.warning("Skipping %r — no SKILL.md found", dir_name)
+        return None
+
+    # python-frontmatter correctly handles multi-line YAML block scalars (>-, |, etc.)
+    post = frontmatter.load(skill_md_path)
+    display_name: str = post.get("name", dir_name)
+    description: str = post.get("description", "")
+
+    # HTML source: README.md if present, else the SKILL.md body (frontmatter already stripped)
+    readme_path = skill_dir / "README.md"
+    source_text: str = (
+        readme_path.read_text(encoding="utf-8")
+        if readme_path.exists()
+        else post.content
+    )
+
+    out_dir = SKILLS_SITE_DIR / dir_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Zip
+    zip_name = f"{dir_name}.zip"
+    zip_skill(skill_dir, out_dir / zip_name)
+
+    # index.html
+    html_body = to_html(source_text)
+    page = wrap_html(display_name, html_body, download_url=zip_name, back_link=True)
+    (out_dir / "index.html").write_text(page, encoding="utf-8")
+
+    logger.info("Built  %s", dir_name)
+    return SkillMeta(name=display_name, description=description, dir_name=dir_name)
+
+
+def build_root_index(skills: list[SkillMeta]) -> None:
+    """Generate _site/index.html listing all skills alphabetically."""
+    rows = "\n".join(
+        f"    <tr>\n"
+        f'      <td>\n'
+        f'        <a href="skills/{s.dir_name}/">{s.name}</a>\n'
+        f'        <div class="skill-desc">{s.description}</div>\n'
+        f"      </td>\n"
+        f'      <td><a class="download-btn" href="skills/{s.dir_name}/{s.dir_name}.zip">'
+        f"Download .zip</a></td>\n"
+        f"    </tr>"
+        for s in sorted(skills, key=lambda s: s.name.lower())
+    )
+
+    body = (
+        "<h1>Viget Agent Skills</h1>\n"
+        "<p>A collection of reusable skills for AI coding agents. "
+        "Download a <code>.zip</code> and upload it to Claude, Cursor, or any compatible tool.</p>\n"
+        "<table>\n"
+        "  <thead>\n"
+        "    <tr><th>Skill</th><th>Download</th></tr>\n"
+        "  </thead>\n"
+        "  <tbody>\n"
+        f"{rows}\n"
+        "  </tbody>\n"
+        "</table>"
+    )
+
+    page = wrap_html("Viget Agent Skills", body)
+    (SITE_DIR / "index.html").write_text(page, encoding="utf-8")
+
+
+def main() -> None:
+    if SITE_DIR.exists():
+        shutil.rmtree(SITE_DIR)
+    SKILLS_SITE_DIR.mkdir(parents=True)
+
+    skills: list[SkillMeta] = []
+    for skill_dir in sorted(SKILLS_DIR.iterdir()):
+        if skill_dir.is_dir():
+            meta = build_skill(skill_dir)
+            if meta:
+                skills.append(meta)
+
+    build_root_index(skills)
+    logger.info("Done — built %d skill(s) into %s/", len(skills), SITE_DIR)
+
+
+if __name__ == "__main__":
+    main()
