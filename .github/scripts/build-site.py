@@ -207,7 +207,7 @@ def build_root_index(skills: list[SkillMeta]) -> None:
             f'        <div class="skill-desc">{html.escape(s.description)}</div>\n'
             f"      </td>\n"
             f'      <td><a class="download-btn" href="skills/{s.dir_name}/{s.dir_name}.zip">'
-            f"Download .zip</a></td>\n"
+            f"Download&nbsp;.zip</a></td>\n"
             f"    </tr>"
         )
 
