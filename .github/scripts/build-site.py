@@ -35,14 +35,12 @@ _VALID_NAME = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 _MD = markdown.Markdown(extensions=["fenced_code", "tables"], output_format="html")
 
 # Allowed HTML tags and attributes after nh3 sanitization.
-# bleach defaults were: a, abbr, acronym, b, blockquote, code, em, i, li, ol, strong, ul
 _ALLOWED_TAGS = {
     "a", "abbr", "acronym", "b", "blockquote", "code", "em", "i", "li", "ol", "strong", "ul",
     "p", "pre", "h1", "h2", "h3", "h4", "h5", "h6",
     "table", "thead", "tbody", "tr", "th", "td",
     "hr", "br", "img",
 }
-# bleach defaults were: {"a": ["href", "title"], "abbr": ["title"], "acronym": ["title"]}
 _ALLOWED_ATTRS = {
     "a": {"href", "title"},
     "abbr": {"title"},
@@ -119,7 +117,7 @@ def wrap_html(
 ) -> str:
     """Wrap an HTML fragment in a full document with inline CSS."""
     back = '<a class="back-link" href="../../">\u2190 All Skills</a>\n' if back_link else ""
-    dl = f'<a class="download-btn" href="{download_url}">Download .zip</a>\n' if download_url else ""
+    dl = f'<a class="download-btn" href="{html.escape(download_url)}">Download .zip</a>\n' if download_url else ""
     return f"""\
 <!DOCTYPE html>
 <html lang="en">
@@ -141,10 +139,10 @@ def zip_skill(skill_dir: Path, zip_path: Path) -> None:
     """Write a zip whose root entry is the skill folder (e.g. viget-lore/)."""
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for file_path in sorted(skill_dir.rglob("*")):
-            if not file_path.is_file():
-                continue
             if file_path.is_symlink():
                 logger.warning("Skipping symlink %s", file_path)
+                continue
+            if not file_path.is_file():
                 continue
             # Arcname keeps the skill folder as the zip root
             arcname = file_path.relative_to(skill_dir.parent)
@@ -201,7 +199,7 @@ def build_skill(skill_dir: Path) -> SkillMeta:
 def build_root_index(skills: list[SkillMeta]) -> None:
     """Generate _site/index.html listing all skills alphabetically."""
     rows = []
-    for s in sorted(skills, key=lambda s: s.name.lower()):
+    for s in sorted(skills, key=lambda sk: sk.name.lower()):
         rows.append(
             f"    <tr>\n"
             f'      <td>\n'
